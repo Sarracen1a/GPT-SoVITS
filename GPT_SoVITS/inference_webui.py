@@ -318,7 +318,9 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
     prompt_language = dict_language[prompt_language]
     text_language = dict_language[text_language]
     if not ref_free:
+        # 预处理，去除换行符
         prompt_text = prompt_text.strip("\n")
+        # splits = {"，", "。", "？", "！", ",", ".", "?", "!", "~", ":", "：", "—", "…", }
         if (prompt_text[-1] not in splits): prompt_text += "。" if prompt_language != "en" else "."
         print(i18n("实际输入的参考文本:"), prompt_text)
     text = text.strip("\n")
