@@ -311,6 +311,7 @@ def merge_short_text_in_array(texts, threshold):
             result[len(result) - 1] += text
     return result
 
+#推理 TTS 语音入口
 def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language, how_to_cut=i18n("不切"), top_k=20, top_p=0.6, temperature=0.6, ref_free = False):
     if prompt_text is None or len(prompt_text) == 0:
         ref_free = True
@@ -321,29 +322,41 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
         # 预处理，去除换行符
         prompt_text = prompt_text.strip("\n")
         # splits = {"，", "。", "？", "！", ",", ".", "?", "!", "~", ":", "：", "—", "…", }
+        # 句子最后自动加上分隔符
         if (prompt_text[-1] not in splits): prompt_text += "。" if prompt_language != "en" else "."
         print(i18n("实际输入的参考文本:"), prompt_text)
+    #tts target text 预处理，去除头尾换行符
     text = text.strip("\n")
-    if (text[0] not in splits and len(get_first(text)) < 4): text = "。" + text if text_language != "en" else "." + text
+    #todo:这边还需要弄懂一下，为什么
+    #给text 若开头无分隔符 且 正则完后第一个短句长度小于4 在第一个字符加上"。"分隔符
+    if (text[0] not in splits and len(get_first(text)) < 4): 
+        text = "。" + text if text_language != "en" else "." + text
     
     print(i18n("实际输入的目标文本:"), text)
+    #全零的音频波形数组
     zero_wav = np.zeros(
         int(hps.data.sampling_rate * 0.3),
         dtype=np.float16 if is_half == True else np.float32,
     )
+    #推理时不计算梯度
     with torch.no_grad():
+        #把 ref 音频重采样到 16k
         wav16k, sr = librosa.load(ref_wav_path, sr=16000)
         if (wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000):
             raise OSError(i18n("参考音频在3~10秒范围外，请更换！"))
+        #numpy 转换成 pytorch 张量
         wav16k = torch.from_numpy(wav16k)
         zero_wav_torch = torch.from_numpy(zero_wav)
         if is_half == True:
             wav16k = wav16k.half().to(device)
             zero_wav_torch = zero_wav_torch.half().to(device)
         else:
+            #指定计算设备
             wav16k = wav16k.to(device)
             zero_wav_torch = zero_wav_torch.to(device)
+        #拼起来
         wav16k = torch.cat([wav16k, zero_wav_torch])
+        #过一遍自监督模型
         ssl_content = ssl_model.model(wav16k.unsqueeze(0))[
             "last_hidden_state"
         ].transpose(
@@ -372,7 +385,7 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
     audio_opt = []
     if not ref_free:
         phones1,bert1,norm_text1=get_phones_and_bert(prompt_text, prompt_language)
-
+    
     for text in texts:
         # 解决输入目标文本的空行导致报错的问题
         if (len(text.strip()) == 0):
