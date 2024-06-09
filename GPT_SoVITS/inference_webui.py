@@ -356,14 +356,18 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
             zero_wav_torch = zero_wav_torch.to(device)
         #拼起来
         wav16k = torch.cat([wav16k, zero_wav_torch])
-        #过一遍自监督模型
+        #过一遍hubert
+        #ssl_model = cnhubert.get_model()
+        #使用 cn_hubert ，基于wav逐层encode，抽取语音hubert 自监督向量
         ssl_content = ssl_model.model(wav16k.unsqueeze(0))[
             "last_hidden_state"
         ].transpose(
             1, 2
         )  # .float()
+        #vq提取codebook？  提取隐藏特征
+        #过 codebook，得到对应wav 的 codebook ids
         codes = vq_model.extract_latent(ssl_content)
-   
+
         prompt_semantic = codes[0, 0]
     t1 = ttime()
 
@@ -384,6 +388,7 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
     texts = merge_short_text_in_array(texts, 5)
     audio_opt = []
     if not ref_free:
+        #text ids 转换为发音 phone ids，根据phone ids 编码 bert 特征，取bert模型倒数第3层tensor，同时去掉SOS 和EOS
         phones1,bert1,norm_text1=get_phones_and_bert(prompt_text, prompt_language)
     
     for text in texts:
