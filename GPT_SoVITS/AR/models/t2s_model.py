@@ -323,9 +323,9 @@ class Text2SemanticDecoder(nn.Module):
 
     def infer_panel(
         self,
-        x,  #####全部文本token
+        x,  #####全部文本token  all_phoneme_ids
         x_lens,
-        prompts,  ####参考音频token
+        prompts,  ####参考音频token prompt_semantic 过vq拿到的
         bert_feature,
         top_k: int = -100,
         top_p: int = 100,
