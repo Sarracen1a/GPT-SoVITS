@@ -365,7 +365,7 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
             1, 2
         )  # .float()
         #vq提取codebook？  提取隐藏特征
-        #过 codebook，得到对应wav 的 codebook ids
+        #过  codebook，得到对应wav 的 codebook ids
         codes = vq_model.extract_latent(ssl_content)
 
         prompt_semantic = codes[0, 0]
@@ -424,10 +424,12 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
                 early_stop_num=hz * max_sec,
             )
         t3 = ttime()
-        # print(pred_semantic.shape,idx)
+        # print(pred_semantic.shape,idx)  idx 用于截断pred_sementic （去掉参考音频的特征）
         pred_semantic = pred_semantic[:, -idx:].unsqueeze(
             0
         )  # .unsqueeze(0)#mq要多unsqueeze一次
+
+        #ref_wav的spec加载
         refer = get_spepc(hps, ref_wav_path)  # .to(device)
         if is_half == True:
             refer = refer.half().to(device)
