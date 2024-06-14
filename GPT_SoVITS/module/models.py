@@ -1010,9 +1010,8 @@ class SynthesizerTrn(nn.Module):
                 commons.sequence_mask(refer_lengths, refer_mix.size(2)), 1
             ).to(refer_mix.dtype)
             ge_mix = self.ref_enc(refer_mix * refer_mask, refer_mask)
-        #待删除
-        print("ge",ge)
-        print("ge_mix",ge_mix)
+        #print("ge",ge)
+        #print("ge_mix",ge_mix)
         ge = mix_weight*ge+(1-mix_weight)*ge_mix
         y_lengths = torch.LongTensor([codes.size(2) * 2]).to(codes.device)
         text_lengths = torch.LongTensor([text.size(-1)]).to(text.device)
