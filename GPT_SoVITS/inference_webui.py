@@ -311,34 +311,12 @@ def merge_short_text_in_array(texts, threshold):
             result[len(result) - 1] += text
     return result
 
-#推理 TTS 语音入口
-def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language, how_to_cut=i18n("不切"), top_k=20, top_p=0.6, temperature=0.6, ref_free = False):
-    if prompt_text is None or len(prompt_text) == 0:
-        ref_free = True
-    t0 = ttime()
-    prompt_language = dict_language[prompt_language]
-    text_language = dict_language[text_language]
-    if not ref_free:
-        # 预处理，去除换行符
-        prompt_text = prompt_text.strip("\n")
-        # splits = {"，", "。", "？", "！", ",", ".", "?", "!", "~", ":", "：", "—", "…", }
-        # 句子最后自动加上分隔符
-        if (prompt_text[-1] not in splits): prompt_text += "。" if prompt_language != "en" else "."
-        print(i18n("实际输入的参考文本:"), prompt_text)
-    #tts target text 预处理，去除头尾换行符
-    text = text.strip("\n")
-    #todo:这边还需要弄懂一下，为什么
-    #给text 若开头无分隔符 且 正则完后第一个短句长度小于4 在第一个字符加上"。"分隔符
-    if (text[0] not in splits and len(get_first(text)) < 4): 
-        text = "。" + text if text_language != "en" else "." + text
-    
-    print(i18n("实际输入的目标文本:"), text)
+def ref_wav2prompt_semantic(ref_wav_path):
     #全零的音频波形数组
     zero_wav = np.zeros(
         int(hps.data.sampling_rate * 0.3),
         dtype=np.float16 if is_half == True else np.float32,
     )
-    #推理时不计算梯度
     with torch.no_grad():
         #把 ref 音频重采样到 16k
         wav16k, sr = librosa.load(ref_wav_path, sr=16000)
@@ -351,7 +329,6 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
             wav16k = wav16k.half().to(device)
             zero_wav_torch = zero_wav_torch.half().to(device)
         else:
-            #指定计算设备
             wav16k = wav16k.to(device)
             zero_wav_torch = zero_wav_torch.to(device)
         #拼起来
@@ -367,8 +344,38 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
         #vq提取codebook？  提取隐藏特征
         #过  codebook，得到对应wav 的 codebook ids
         codes = vq_model.extract_latent(ssl_content)
-
         prompt_semantic = codes[0, 0]
+
+        return prompt_semantic
+
+
+#推理 TTS 语音入口
+def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_language, text, text_language, how_to_cut=i18n("不切"), top_k=20, top_p=0.6, temperature=0.6, ref_free = False):
+
+    if prompt_text is None or len(prompt_text) == 0:
+        ref_free = True
+    t0 = ttime()
+    prompt_language = dict_language[prompt_language]
+    text_language = dict_language[text_language]
+    if not ref_free:
+        # 预处理，去除换行符
+        prompt_text = prompt_text.strip("\n")
+        # splits = {"，", "。", "？", "！", ",", ".", "?", "!", "~", ":", "：", "—", "…", }
+        # 句子最后自动加上分隔符
+        if (prompt_text[-1] not in splits): prompt_text += "。" if prompt_language != "en" else "."
+        print(i18n("实际输入的参考文本:"), prompt_text)
+    #tts target text 预处理，去除头尾换行符
+    text = text.strip("\n")
+    #给text 若开头无分隔符 且 正则完后第一个短句长度小于4 在第一个字符加上"。"分隔符
+    if (text[0] not in splits and len(get_first(text)) < 4): 
+        text = "。" + text if text_language != "en" else "." + text
+    print(i18n("实际输入的目标文本:"), text)
+
+
+
+    #ref_wav2prompt_semantic
+    prompt_semantic = ref_wav2prompt_semantic(ref_wav_path)
+    
     t1 = ttime()
 
     if (how_to_cut == i18n("凑四句一切")):
@@ -387,8 +394,9 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
     texts = text.split("\n")
     texts = merge_short_text_in_array(texts, 5)
     audio_opt = []
+
     if not ref_free:
-        #text ids 转换为发音 phone ids，根据phone ids 编码 bert 特征，取bert模型倒数第3层tensor，同时去掉SOS 和EOS
+        #text ids 转换为发音 phone ids，根据phone ids 编码 bert 特征，取bert模型倒数第3层tensor，同时去掉SOS和EOS
         phones1,bert1,norm_text1=get_phones_and_bert(prompt_text, prompt_language)
     
     for text in texts:
@@ -401,7 +409,14 @@ def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,
         print(i18n("前端处理后的文本(每句):"), norm_text2)
         if not ref_free:
             bert = torch.cat([bert1, bert2], 1)
+            print("bert1:",bert1)
+            print("bert2:",bert2)
+            print("bert:",bert)
             all_phoneme_ids = torch.LongTensor(phones1+phones2).to(device).unsqueeze(0)
+            print("phone1:",phones1)
+            print("phone2:",phones2)
+            print("1+2:",all_phoneme_ids)
+
         else:
             bert = bert2
             all_phoneme_ids = torch.LongTensor(phones2).to(device).unsqueeze(0)
@@ -585,11 +600,19 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
             GPT_dropdown.change(change_gpt_weights, [GPT_dropdown], [])
         gr.Markdown(value=i18n("*请上传并填写参考信息"))
         with gr.Row():
-            inp_ref = gr.Audio(label=i18n("请上传3~10秒内参考音频，超过会报错！"), type="filepath")
+            with gr.Column():
+                inp_ref = gr.Audio(label=i18n("1请上传3~10秒内参考音频，超过会报错！"), type="filepath")
+                inp_ref2 = gr.Audio(label=i18n("2请上传3~10秒内参考音频，超过会报错！"), type="filepath")
+                inp_ref3 = gr.Audio(label=i18n("3请上传3~10秒内参考音频，超过会报错！"), type="filepath")
+                inp_ref4 = gr.Audio(label=i18n("4请上传3~10秒内参考音频，超过会报错！"), type="filepath")
+
             with gr.Column():
                 ref_text_free = gr.Checkbox(label=i18n("开启无参考文本模式。不填参考文本亦相当于开启。"), value=False, interactive=True, show_label=True)
                 gr.Markdown(i18n("使用无参考文本模式时建议使用微调的GPT，听不清参考音频说的啥(不晓得写啥)可以开，开启后无视填写的参考文本。"))
-                prompt_text = gr.Textbox(label=i18n("参考音频的文本"), value="")
+                prompt_text = gr.Textbox(label=i18n("参考音频的文本1"), value="")
+                prompt_text2 = gr.Textbox(label=i18n("参考音频的文本2"), value="")
+                prompt_text3 = gr.Textbox(label=i18n("参考音频的文本3"), value="")
+                prompt_text4 = gr.Textbox(label=i18n("参考音频的文本4"), value="")
             prompt_language = gr.Dropdown(
                 label=i18n("参考音频的语种"), choices=[i18n("中文"), i18n("英文"), i18n("日文"), i18n("中英混合"), i18n("日英混合"), i18n("多语种混合")], value=i18n("中文")
             )
@@ -615,7 +638,7 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
 
         inference_button.click(
             get_tts_wav,
-            [inp_ref, prompt_text, prompt_language, text, text_language, how_to_cut, top_k, top_p, temperature, ref_text_free],
+            [inp_ref,inp_ref2, prompt_text, prompt_text2,prompt_language, text, text_language, how_to_cut, top_k, top_p, temperature, ref_text_free],
             [output],
         )
 
