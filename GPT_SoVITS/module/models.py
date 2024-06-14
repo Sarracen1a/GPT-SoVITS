@@ -993,6 +993,45 @@ class SynthesizerTrn(nn.Module):
 
         o = self.dec((z * y_mask)[:, :, :], g=ge)
         return o
+    
+    #mix_weight
+    @torch.no_grad()
+    def decode_mix(self, codes, text, refer,refer_mix,mix_weight: int=1,noise_scale=0.5):
+        ge = None
+        if refer is not None:
+            refer_lengths = torch.LongTensor([refer.size(2)]).to(refer.device)
+            refer_mask = torch.unsqueeze(
+                commons.sequence_mask(refer_lengths, refer.size(2)), 1
+            ).to(refer.dtype)
+            ge = self.ref_enc(refer * refer_mask, refer_mask)
+        if refer_mix is not None:
+            refer_lengths = torch.LongTensor([refer_mix.size(2)]).to(refer_mix.device)
+            refer_mask = torch.unsqueeze(
+                commons.sequence_mask(refer_lengths, refer_mix.size(2)), 1
+            ).to(refer_mix.dtype)
+            ge_mix = self.ref_enc(refer_mix * refer_mask, refer_mask)
+        #待删除
+        print("ge",ge)
+        print("ge_mix",ge_mix)
+        ge = mix_weight*ge+(1-mix_weight)*ge_mix
+        y_lengths = torch.LongTensor([codes.size(2) * 2]).to(codes.device)
+        text_lengths = torch.LongTensor([text.size(-1)]).to(text.device)
+
+        quantized = self.quantizer.decode(codes)
+        if self.semantic_frame_rate == "25hz":
+            quantized = F.interpolate(
+                quantized, size=int(quantized.shape[-1] * 2), mode="nearest"
+            )
+
+        x, m_p, logs_p, y_mask = self.enc_p(
+            quantized, y_lengths, text, text_lengths, ge
+        )
+        z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
+
+        z = self.flow(z_p, y_mask, g=ge, reverse=True)
+
+        o = self.dec((z * y_mask)[:, :, :], g=ge)
+        return o
 
     def extract_latent(self, x):
         ssl = self.ssl_proj(x)

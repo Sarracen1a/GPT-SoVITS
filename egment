@@ -1,0 +1,142 @@
+[1mdiff --git a/GPT_SoVITS/inference_webui.py b/GPT_SoVITS/inference_webui.py[m
+[1mindex 72413f0..8fa031a 100644[m
+[1m--- a/GPT_SoVITS/inference_webui.py[m
+[1m+++ b/GPT_SoVITS/inference_webui.py[m
+[36m@@ -311,8 +311,45 @@[m [mdef merge_short_text_in_array(texts, threshold):[m
+             result[len(result) - 1] += text[m
+     return result[m
+ [m
+[32m+[m[32mdef ref_wav2prompt_semantic(ref_wav_path,):[m
+[32m+[m[32m    #全零的音频波形数组[m
+[32m+[m[32m    zero_wav = np.zeros([m
+[32m+[m[32m        int(hps.data.sampling_rate * 0.3),[m
+[32m+[m[32m        dtype=np.float16 if is_half == True else np.float32,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    with torch.no_grad():[m
+[32m+[m[32m        #把 ref 音频重采样到 16k[m
+[32m+[m[32m        wav16k, sr = librosa.load(ref_wav_path, sr=16000)[m
+[32m+[m[32m        if (wav16k.shape[0] > 160000 or wav16k.shape[0] < 48000):[m
+[32m+[m[32m            raise OSError(i18n("参考音频在3~10秒范围外，请更换！"))[m
+[32m+[m[32m        #numpy 转换成 pytorch 张量[m
+[32m+[m[32m        wav16k = torch.from_numpy(wav16k)[m
+[32m+[m[32m        zero_wav_torch = torch.from_numpy(zero_wav)[m
+[32m+[m[32m        if is_half == True:[m
+[32m+[m[32m            wav16k = wav16k.half().to(device)[m
+[32m+[m[32m            zero_wav_torch = zero_wav_torch.half().to(device)[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            wav16k = wav16k.to(device)[m
+[32m+[m[32m            zero_wav_torch = zero_wav_torch.to(device)[m
+[32m+[m[32m        #拼起来[m
+[32m+[m[32m        wav16k = torch.cat([wav16k, zero_wav_torch])[m
+[32m+[m[32m        #过一遍hubert[m
+[32m+[m[32m        #ssl_model = cnhubert.get_model()[m
+[32m+[m[32m        #使用 cn_hubert ，基于wav逐层encode，抽取语音hubert 自监督向量[m
+[32m+[m[32m        ssl_content = ssl_model.model(wav16k.unsqueeze(0))[[m
+[32m+[m[32m            "last_hidden_state"[m
+[32m+[m[32m        ].transpose([m
+[32m+[m[32m            1, 2[m
+[32m+[m[32m        )  # .float()[m
+[32m+[m[32m        #vq提取codebook？  提取隐藏特征[m
+[32m+[m[32m        #过  codebook，得到对应wav 的 codebook ids[m
+[32m+[m[32m        codes = vq_model.extract_latent(ssl_content)[m
+[32m+[m[32m        prompt_semantic = codes[0, 0][m
+[32m+[m
+[32m+[m
+ #推理 TTS 语音入口[m
+[31m-def get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language, how_to_cut=i18n("不切"), top_k=20, top_p=0.6, temperature=0.6, ref_free = False):[m
+[32m+[m[32mdef get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_language, text, text_language, how_to_cut=i18n("不切"), top_k=20, top_p=0.6, temperature=0.6, ref_free = False):[m
+[32m+[m
+     if prompt_text is None or len(prompt_text) == 0:[m
+         ref_free = True[m
+     t0 = ttime()[m
+[36m@@ -331,14 +368,15 @@[m [mdef get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,[m
+     #给text 若开头无分隔符 且 正则完后第一个短句长度小于4 在第一个字符加上"。"分隔符[m
+     if (text[0] not in splits and len(get_first(text)) < 4): [m
+         text = "。" + text if text_language != "en" else "." + text[m
+[31m-    [m
+     print(i18n("实际输入的目标文本:"), text)[m
+     #全零的音频波形数组[m
+     zero_wav = np.zeros([m
+         int(hps.data.sampling_rate * 0.3),[m
+         dtype=np.float16 if is_half == True else np.float32,[m
+     )[m
+[31m-    #推理时不计算梯度[m
+[32m+[m[32m    #推理[m
+[32m+[m[32m    #var in ref_wav_path is_half[m
+[32m+[m[32m    #var out prompt_semantic[m
+     with torch.no_grad():[m
+         #把 ref 音频重采样到 16k[m
+         wav16k, sr = librosa.load(ref_wav_path, sr=16000)[m
+[36m@@ -351,7 +389,6 @@[m [mdef get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,[m
+             wav16k = wav16k.half().to(device)[m
+             zero_wav_torch = zero_wav_torch.half().to(device)[m
+         else:[m
+[31m-            #指定计算设备[m
+             wav16k = wav16k.to(device)[m
+             zero_wav_torch = zero_wav_torch.to(device)[m
+         #拼起来[m
+[36m@@ -367,8 +404,8 @@[m [mdef get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,[m
+         #vq提取codebook？  提取隐藏特征[m
+         #过  codebook，得到对应wav 的 codebook ids[m
+         codes = vq_model.extract_latent(ssl_content)[m
+[31m-[m
+         prompt_semantic = codes[0, 0][m
+[32m+[m[41m    [m
+     t1 = ttime()[m
+ [m
+     if (how_to_cut == i18n("凑四句一切")):[m
+[36m@@ -388,7 +425,7 @@[m [mdef get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,[m
+     texts = merge_short_text_in_array(texts, 5)[m
+     audio_opt = [][m
+     if not ref_free:[m
+[31m-        #text ids 转换为发音 phone ids，根据phone ids 编码 bert 特征，取bert模型倒数第3层tensor，同时去掉SOS 和EOS[m
+[32m+[m[32m        #text ids 转换为发音 phone ids，根据phone ids 编码 bert 特征，取bert模型倒数第3层tensor，同时去掉SOS和EOS[m
+         phones1,bert1,norm_text1=get_phones_and_bert(prompt_text, prompt_language)[m
+     [m
+     for text in texts:[m
+[36m@@ -401,7 +438,14 @@[m [mdef get_tts_wav(ref_wav_path, prompt_text, prompt_language, text, text_language,[m
+         print(i18n("前端处理后的文本(每句):"), norm_text2)[m
+         if not ref_free:[m
+             bert = torch.cat([bert1, bert2], 1)[m
+[32m+[m[32m            print("bert1:",bert1)[m
+[32m+[m[32m            print("bert2:",bert2)[m
+[32m+[m[32m            print("bert:",bert)[m
+             all_phoneme_ids = torch.LongTensor(phones1+phones2).to(device).unsqueeze(0)[m
+[32m+[m[32m            print("phone1:",phones1)[m
+[32m+[m[32m            print("phone2:",phones2)[m
+[32m+[m[32m            print("1+2:",all_phoneme_ids)[m
+[32m+[m
+         else:[m
+             bert = bert2[m
+             all_phoneme_ids = torch.LongTensor(phones2).to(device).unsqueeze(0)[m
+[36m@@ -585,11 +629,19 @@[m [mwith gr.Blocks(title="GPT-SoVITS WebUI") as app:[m
+             GPT_dropdown.change(change_gpt_weights, [GPT_dropdown], [])[m
+         gr.Markdown(value=i18n("*请上传并填写参考信息"))[m
+         with gr.Row():[m
+[31m-            inp_ref = gr.Audio(label=i18n("请上传3~10秒内参考音频，超过会报错！"), type="filepath")[m
+[32m+[m[32m            with gr.Column():[m
+[32m+[m[32m                inp_ref = gr.Audio(label=i18n("1请上传3~10秒内参考音频，超过会报错！"), type="filepath")[m
+[32m+[m[32m                inp_ref2 = gr.Audio(label=i18n("2请上传3~10秒内参考音频，超过会报错！"), type="filepath")[m
+[32m+[m[32m                inp_ref3 = gr.Audio(label=i18n("3请上传3~10秒内参考音频，超过会报错！"), type="filepath")[m
+[32m+[m[32m                inp_ref4 = gr.Audio(label=i18n("4请上传3~10秒内参考音频，超过会报错！"), type="filepath")[m
+[32m+[m
+             with gr.Column():[m
+                 ref_text_free = gr.Checkbox(label=i18n("开启无参考文本模式。不填参考文本亦相当于开启。"), value=False, interactive=True, show_label=True)[m
+                 gr.Markdown(i18n("使用无参考文本模式时建议使用微调的GPT，听不清参考音频说的啥(不晓得写啥)可以开，开启后无视填写的参考文本。"))[m
+[31m-                prompt_text = gr.Textbox(label=i18n("参考音频的文本"), value="")[m
+[32m+[m[32m                prompt_text = gr.Textbox(label=i18n("参考音频的文本1"), value="")[m
+[32m+[m[32m                prompt_text2 = gr.Textbox(label=i18n("参考音频的文本2"), value="")[m
+[32m+[m[32m                prompt_text3 = gr.Textbox(label=i18n("参考音频的文本3"), value="")[m
+[32m+[m[32m                prompt_text4 = gr.Textbox(label=i18n("参考音频的文本4"), value="")[m
+             prompt_language = gr.Dropdown([m
+                 label=i18n("参考音频的语种"), choices=[i18n("中文"), i18n("英文"), i18n("日文"), i18n("中英混合"), i18n("日英混合"), i18n("多语种混合")], value=i18n("中文")[m
+             )[m
+[36m@@ -615,7 +667,7 @@[m [mwith gr.Blocks(title="GPT-SoVITS WebUI") as app:[m
+ [m
+         inference_button.click([m
+             get_tts_wav,[m
+[31m-            [inp_ref, prompt_text, prompt_language, text, text_language, how_to_cut, top_k, top_p, temperature, ref_text_free],[m
+[32m+[m[32m            [inp_ref,inp_ref2, prompt_text, prompt_text2,prompt_language, text, text_language, how_to_cut, top_k, top_p, temperature, ref_text_free],[m
+             [output],[m
+         )[m
+ [m

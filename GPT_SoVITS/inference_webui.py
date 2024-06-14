@@ -336,11 +336,7 @@ def ref_wav2prompt_semantic(ref_wav_path):
         #过一遍hubert
         #ssl_model = cnhubert.get_model()
         #使用 cn_hubert ，基于wav逐层encode，抽取语音hubert 自监督向量
-        ssl_content = ssl_model.model(wav16k.unsqueeze(0))[
-            "last_hidden_state"
-        ].transpose(
-            1, 2
-        )  # .float()
+        ssl_content = ssl_model.model(wav16k.unsqueeze(0))["last_hidden_state"].transpose(1, 2)  # .float()
         #vq提取codebook？  提取隐藏特征
         #过  codebook，得到对应wav 的 codebook ids
         codes = vq_model.extract_latent(ssl_content)
@@ -350,7 +346,7 @@ def ref_wav2prompt_semantic(ref_wav_path):
 
 
 #推理 TTS 语音入口
-def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_language, text, text_language, how_to_cut=i18n("不切"), top_k=20, top_p=0.6, temperature=0.6, ref_free = False):
+def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_language, text, text_language, how_to_cut=i18n("不切"), mix_weight=1,top_k=20, top_p=0.6, temperature=0.6, ref_free = False):
 
     if prompt_text is None or len(prompt_text) == 0:
         ref_free = True
@@ -372,9 +368,17 @@ def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_lan
     print(i18n("实际输入的目标文本:"), text)
 
 
-
+    zero_wav = np.zeros(
+        int(hps.data.sampling_rate * 0.3),
+        dtype=np.float16 if is_half == True else np.float32,
+    )
     #ref_wav2prompt_semantic
     prompt_semantic = ref_wav2prompt_semantic(ref_wav_path)
+    print("prompt_semantic",prompt_semantic)
+    #prompt_semantic += ref_wav2prompt_semantic(ref_wav_path2)
+    #print("prompt_semantic-afterMixture",prompt_semantic)
+
+
     
     t1 = ttime()
 
@@ -398,6 +402,9 @@ def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_lan
     if not ref_free:
         #text ids 转换为发音 phone ids，根据phone ids 编码 bert 特征，取bert模型倒数第3层tensor，同时去掉SOS和EOS
         phones1,bert1,norm_text1=get_phones_and_bert(prompt_text, prompt_language)
+        #声线融合
+        phones_mix,bert1_mix,norm_text1=get_phones_and_bert(prompt_text, prompt_language)
+
     
     for text in texts:
         # 解决输入目标文本的空行导致报错的问题
@@ -444,21 +451,24 @@ def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_lan
             0
         )  # .unsqueeze(0)#mq要多unsqueeze一次
 
-        #ref_wav的spec加载
+        #ref_wav spec
         refer = get_spepc(hps, ref_wav_path)  # .to(device)
         if is_half == True:
             refer = refer.half().to(device)
         else:
             refer = refer.to(device)
+
+        #ref_wav spec
+        refer_mix = get_spepc(hps, ref_wav_path2)  # .to(device)
+        if is_half == True:
+            refer_mix = refer_mix.half().to(device)
+        else:
+            refer_mix = refer_mix.to(device)
         # audio = vq_model.decode(pred_semantic, all_phoneme_ids, refer).detach().cpu().numpy()[0, 0]
         audio = (
-            vq_model.decode(
-                pred_semantic, torch.LongTensor(phones2).to(device).unsqueeze(0), refer
-            )
-                .detach()
-                .cpu()
-                .numpy()[0, 0]
-        )  ###试试重建不带上prompt部分
+            #vq_model.decode(pred_semantic, torch.LongTensor(phones2).to(device).unsqueeze(0), refer).detach().cpu().numpy()[0, 0]
+            vq_model.decode_mix(pred_semantic, torch.LongTensor(phones2).to(device).unsqueeze(0), refer,refer_mix,mix_weight).detach().cpu().numpy()[0, 0])  
+        ###试试重建不带上prompt部分
         max_audio=np.abs(audio).max()#简单防止16bit爆音
         if max_audio>1:audio/=max_audio
         audio_opt.append(audio)
@@ -632,13 +642,14 @@ with gr.Blocks(title="GPT-SoVITS WebUI") as app:
                 gr.Markdown(value=i18n("gpt采样参数(无参考文本时不要太低)："))
                 top_k = gr.Slider(minimum=1,maximum=100,step=1,label=i18n("top_k"),value=5,interactive=True)
                 top_p = gr.Slider(minimum=0,maximum=1,step=0.05,label=i18n("top_p"),value=1,interactive=True)
+                mix_weight = gr.Slider(minimum=0,maximum=1,step=0.05,label=i18n("mix_weight"),value=1,interactive=True)
                 temperature = gr.Slider(minimum=0,maximum=1,step=0.05,label=i18n("temperature"),value=1,interactive=True)
             inference_button = gr.Button(i18n("合成语音"), variant="primary")
             output = gr.Audio(label=i18n("输出的语音"))
 
         inference_button.click(
             get_tts_wav,
-            [inp_ref,inp_ref2, prompt_text, prompt_text2,prompt_language, text, text_language, how_to_cut, top_k, top_p, temperature, ref_text_free],
+            [inp_ref,inp_ref2, prompt_text, prompt_text2,prompt_language, text, text_language, how_to_cut, mix_weight,top_k, top_p, temperature, ref_text_free],
             [output],
         )
 
