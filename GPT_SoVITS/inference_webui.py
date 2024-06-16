@@ -311,7 +311,7 @@ def merge_short_text_in_array(texts, threshold):
             result[len(result) - 1] += text
     return result
 
-def ref_wav2prompt_semantic(ref_wav_path):
+def wav2ssl2vq(ref_wav_path):
     #全零的音频波形数组
     zero_wav = np.zeros(
         int(hps.data.sampling_rate * 0.3),
@@ -372,8 +372,8 @@ def get_tts_wav(ref_wav_path,ref_wav_path2, prompt_text,prompt_text2, prompt_lan
         int(hps.data.sampling_rate * 0.3),
         dtype=np.float16 if is_half == True else np.float32,
     )
-    #ref_wav2prompt_semantic
-    prompt_semantic = ref_wav2prompt_semantic(ref_wav_path)
+    #ref_wav 过一遍 ssl Hubert 拿到ssl_content再过一边vq 拿到prompt_semantic  
+    prompt_semantic = wav2ssl2vq(ref_wav_path)
     print("prompt_semantic",prompt_semantic)
     #prompt_semantic += ref_wav2prompt_semantic(ref_wav_path2)
     #print("prompt_semantic-afterMixture",prompt_semantic)
