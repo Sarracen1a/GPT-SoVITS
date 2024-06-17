@@ -900,12 +900,16 @@ class SynthesizerTrn(nn.Module):
             # self.enc_p.encoder_text.requires_grad_(False)
             # self.enc_p.mrte.requires_grad_(False)
 
+    #y-mel
     def forward(self, ssl, y, y_lengths, text, text_lengths):
+        #mask
         y_mask = torch.unsqueeze(commons.sequence_mask(y_lengths, y.size(2)), 1).to(
             y.dtype
         )
+        #mel过encoder(MelStyleEncoder)->ge
         ge = self.ref_enc(y * y_mask, y_mask)
 
+        #是否启用自动混合精度
         with autocast(enabled=False):
             maybe_no_grad = torch.no_grad() if self.freeze_quantizer else contextlib.nullcontext()
             with maybe_no_grad:
@@ -917,6 +921,7 @@ class SynthesizerTrn(nn.Module):
                 ssl, layers=[0]
             )
 
+        #tobecontinue
         if self.semantic_frame_rate == "25hz":
             quantized = F.interpolate(
                 quantized, size=int(quantized.shape[-1] * 2), mode="nearest"
